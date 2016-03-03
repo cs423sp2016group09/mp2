@@ -35,26 +35,6 @@ typedef struct node
 static LIST_HEAD(head);
 DEFINE_MUTEX(mutex_list);
 
-// set up work queue
-static void wq_fun(struct work_struct *work)
-{
-    int ret;
-    struct node *i;
-
-    mutex_lock_interruptible(&mutex_list);
-    list_for_each_entry(i, &head, list) {
-        ret = get_cpu_use(i->pid, &(i->cputime));
-        // if (ret == -1) {
-        //     printk(KERN_ALERT "not found, pid %d\n", i->pid);    
-        // } else {
-        //     printk(KERN_ALERT "success, pid %d, cpu: %lu\n ", i->pid, i->cputime); 
-        // }
-    }
-    mutex_unlock(&mutex_list);
-
-    return;
-}
-DECLARE_WORK(wq, wq_fun);
 
 // helpers for timer code
 static struct timer_list myTimer;
@@ -102,13 +82,6 @@ static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, l
         kfree(line);
     }
     mutex_unlock(&mutex_list);
-
-    // debugging code 
-    /*
-    int j;
-    for (j = 0; j < 400; j++)
-        printk(KERN_ALERT "char %d:\t%x\t%c\n", j, (unsigned int) buf[j], buf[j]);
-    */
 
     copy_to_user(buffer, buf, READ_BUFFER_SIZE);
     finished_writing = 1; // return 0 on the next run
