@@ -123,9 +123,9 @@ static void DEREGISTRATION(unsigned int pid){
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
           list_del(&(cursor->task_node));
- 	  kmem_cache_free(cache,cursor);
+ 	      kmem_cache_free(cache,cursor);
           break;
-	}    
+	    }    
     }	
     
 }
@@ -136,18 +136,20 @@ static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t c
     unsigned int pid;
     unsigned long period;
     unsigned int computation;
-    switch (buffer[0]){
+    
+    char cmd = buffer[0]; 
+    switch (cmd){
         case 'R':
-            sscanf(&buffer[3], "%u, %lu, %u", &pid, &period, &computation);
-	    REGISTER(pid,period,computation);
-	    break;
+            sscanf(buffer + 3, "%u, %lu, %u", &pid, &period, &computation);
+	        REGISTER(pid,period,computation);
+	        break;
         case 'Y':
-	   // YIELD();
-	    break;
- 	case 'D':
-            sscanf(&buffer[3], "%u", &pid);
-	    DEREGISTRATION(pid);
-	    break;
+	        // YIELD();
+	        break;
+ 	    case 'D':
+            sscanf(buffer + 3, "%u", &pid);
+	        DEREGISTRATION(pid);
+	        break;
     }
 
     // manually null terminate
@@ -184,7 +186,8 @@ int __init mp1_init(void)
     unsigned long currentTime;
     unsigned long expiryTime;
     cache = kmem_cache_create("cache_name", sizeof(mp2_struct), 0, 0, NULL);
-    dispatch_thread = kthread_create(context_switch,NULL,"dispatch_thread")
+    /** does not compile, context switch undefined, TODO fix */
+    // dispatch_thread = kthread_create(context_switch,NULL,"dispatch_thread");
     #ifdef DEBUG
         printk(KERN_ALERT "MP1 MODULE LOADING\n");
     #endif

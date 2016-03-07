@@ -7,4 +7,4 @@ userapp
 Module.symvers
 modules.order
 .mp2*
-.tmp_versions/
+.tmp_versions/*
