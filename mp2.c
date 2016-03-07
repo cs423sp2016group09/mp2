@@ -49,7 +49,7 @@ static struct timer_list myTimer;
     schedule_work(&wq); // trigger the bottom half
 }
 */
-struct mp2_task_struct{
+typedef struct mp2_task_struct{
     struct task_struct *task;
     struct list_head task_node;
     struct timer_list task_timer;
@@ -114,6 +114,19 @@ static void REGISTER(unsigned int pid, unsigned long period, unsigned int comput
     list_add(&(mp2_task->task_node), &head_task);
 
 }
+static void DEREGISTRATION(unsigned int pid){
+    mp2_struct *cursor;
+    mp2_struct *next;
+
+    list_for_each_entry_safe(cursor, next, &head_task, task_node) {
+        if (cursor->pid == pid){
+          list_del(&(cursor->task_node));
+ 	  kmem_cache_free(cache,cursor);
+          break;
+	}    
+    }	
+    
+}
 static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
     int copied;
     char *buf;
@@ -123,14 +136,15 @@ static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t c
     unsigned int computation;
     switch (buffer[0]){
         case 'R':
-            sscanf(&buffer[1], "%u, %lu, %u", &pid, &period, &computation);
+            sscanf(&buffer[3], "%u, %lu, %u", &pid, &period, &computation);
 	    REGISTER(pid,period,computation);
 	    break;
         case 'Y':
 	   // YIELD();
 	    break;
  	case 'D':
-	   // DEREGISTRATION();
+            sscanf(&buffer[3], "%u", &pid);
+	    DEREGISTRATION(pid);
 	    break;
     }
 
