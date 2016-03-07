@@ -8,6 +8,7 @@
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
 #include <linux/cache.h>
+#include <linux/kthread.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include "mp2_given.h"
@@ -20,7 +21,6 @@ MODULE_DESCRIPTION("CS-423 MP1");
 static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
 static struct kmem_cache *cache;
-
 #define SLEEPING 0
 #define READY 1
 #define RUNNING 2
@@ -59,6 +59,8 @@ typedef struct mp2_task_struct{
     unsigned long relative_period;
     unsigned long slice;
 } mp2_struct;
+
+static struct mp2_task_struct dispatch_thread;
 
 static LIST_HEAD(head_task);
 static int finished_writing;
@@ -182,6 +184,7 @@ int __init mp1_init(void)
     unsigned long currentTime;
     unsigned long expiryTime;
     cache = kmem_cache_create("cache_name", sizeof(mp2_struct), 0, 0, NULL);
+    dispatch_thread = kthread_create(context_switch,NULL,"dispatch_thread")
     #ifdef DEBUG
         printk(KERN_ALERT "MP1 MODULE LOADING\n");
     #endif
@@ -189,7 +192,7 @@ int __init mp1_init(void)
     // set up procfs
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp1_file); 
-
+    
     // set up timer interrupt
     currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
     expiryTime = currentTime + 5*HZ; 
