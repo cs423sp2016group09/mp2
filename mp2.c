@@ -1,5 +1,5 @@
 #define LINUX
-
+#include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h> 
@@ -8,8 +8,9 @@
 #include <linux/timer.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
+#include <linux/slab.h>
 #include <linux/mutex.h>
-#include "mp1_given.h"
+#include "mp2_given.h"
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Group_ID");
@@ -18,7 +19,11 @@ MODULE_DESCRIPTION("CS-423 MP1");
 #define DEBUG 1
 static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
+kmem_cache_t *cache;
 
+#define SLEEPING 0
+#define READY 1
+#define RUNNING 2
 #define FILENAME "status"
 #define DIRECTORY "mp1"
 #define READ_BUFFER_SIZE 1600
@@ -44,7 +49,18 @@ void timerFun (unsigned long arg) {
     schedule_work(&wq); // trigger the bottom half
 }
 
+struct mp2_task_struct{
+    struct task_struct *task;
+    struct list_head task_node;
+    struct timer_list task_timer;
+    unsigned int task_state;
+    uint64_t next_period;
+    unsigned int pid;
+    unsigned long relative_period;
+    unsigned long slice;
+}
 
+static LIST_HEAD(head_task);
 static int finished_writing;
 
 static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
@@ -53,7 +69,7 @@ static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, l
     char * line;
     int line_length;
     char * buf_curr_pos;
-    struct node *i;
+    struct mp2_task_struct *i;
 
     // must return 0 to signal that we're done writing to cat
     if (finished_writing == 1) {
@@ -68,12 +84,12 @@ static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, l
     memset(buf, 0, READ_BUFFER_SIZE);
     buf_curr_pos = buf;
     mutex_lock_interruptible(&mutex_list);
-    list_for_each_entry(i, &head, list) {
+    list_for_each_entry(i, &head_task, task->list_head) {
         // allocate line long enoguh to hold the string
         line = kmalloc(LINE_LENGTH, GFP_KERNEL);
         memset(line, 0, LINE_LENGTH);
 
-        sprintf(line, "PID: %d, time: %lu\n", i->pid, i->cputime);
+        sprintf(line, "PID: %d, relative_period: %lu\n", i->pid, i->relative_period);
         line_length = strlen(line);
         
         snprintf(buf_curr_pos, line_length + 1, "%s", line); // + 1 to account for the null char
@@ -88,12 +104,32 @@ static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, l
     kfree(buf);
     return READ_BUFFER_SIZE;
 }
+static void REGISTER(unsigned int pid, unsigned long period, unsigned int computation){
+    struct mp2_task_struct *mp2_task;
+    mp2_task = kmem_cache_alloc(cache,0);
+    mp2_task->pid = pid;
+    mp2_task->relative_period = period; 
+    //TO DO to add computation
+    mp2_task->task->state = SLEEPING;
+    list_add(mp2_task->task->list_head, &head_task);
 
+}
 static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
     int copied;
     char *buf;
     list_node *new_node;
     int pid;
+    switch (buffer[0]){
+        case 'R': 
+	    REGISTER();
+	    break;
+        case 'Y':
+	    YIELD();
+	    break;
+ 	case 'D':
+	    DEREGISTRATION();
+	    break;
+    }
 
     // manually null terminate
     buf = (char *) kmalloc(count+1,GFP_KERNEL); 
@@ -128,7 +164,7 @@ int __init mp1_init(void)
 {
     unsigned long currentTime;
     unsigned long expiryTime;
-
+    *cache = mem_cache_create("cache_name", sizeof(mp2_task_struct), 0, 0);
     #ifdef DEBUG
         printk(KERN_ALERT "MP1 MODULE LOADING\n");
     #endif
