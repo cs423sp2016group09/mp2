@@ -3,23 +3,23 @@
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/string.h> 
-#include <linux/slab.h>
 #include <linux/proc_fs.h>
 #include <linux/timer.h>
 #include <linux/uaccess.h>
 #include <linux/workqueue.h>
+#include <linux/cache.h>
 #include <linux/slab.h>
 #include <linux/mutex.h>
 #include "mp2_given.h"
 
 MODULE_LICENSE("GPL");
-MODULE_AUTHOR("Group_ID");
+MODULE_AUTHOR("Group_09");
 MODULE_DESCRIPTION("CS-423 MP1");
 
 #define DEBUG 1
 static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
-kmem_cache_t *cache;
+static struct kmem_cache *cache;
 
 #define SLEEPING 0
 #define READY 1
@@ -43,12 +43,12 @@ DEFINE_MUTEX(mutex_list);
 
 // helpers for timer code
 static struct timer_list myTimer;
-void timerFun (unsigned long arg) {
+/*void timerFun (unsigned long arg) {
     myTimer.expires = jiffies + 5*HZ;
-    add_timer (&myTimer); /* setup the timer again */
+    add_timer (&myTimer); // setup the timer again /
     schedule_work(&wq); // trigger the bottom half
 }
-
+*/
 struct mp2_task_struct{
     struct task_struct *task;
     struct list_head task_node;
@@ -58,7 +58,7 @@ struct mp2_task_struct{
     unsigned int pid;
     unsigned long relative_period;
     unsigned long slice;
-}
+} mp2_struct;
 
 static LIST_HEAD(head_task);
 static int finished_writing;
@@ -84,7 +84,7 @@ static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, l
     memset(buf, 0, READ_BUFFER_SIZE);
     buf_curr_pos = buf;
     mutex_lock_interruptible(&mutex_list);
-    list_for_each_entry(i, &head_task, task->list_head) {
+    list_for_each_entry(i, &head_task, task_node) {
         // allocate line long enoguh to hold the string
         line = kmalloc(LINE_LENGTH, GFP_KERNEL);
         memset(line, 0, LINE_LENGTH);
@@ -111,23 +111,26 @@ static void REGISTER(unsigned int pid, unsigned long period, unsigned int comput
     mp2_task->relative_period = period; 
     //TO DO to add computation
     mp2_task->task->state = SLEEPING;
-    list_add(mp2_task->task->list_head, &head_task);
+    list_add(&(mp2_task->task_node), &head_task);
 
 }
 static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
     int copied;
     char *buf;
     list_node *new_node;
-    int pid;
+    unsigned int pid;
+    unsigned long period;
+    unsigned int computation;
     switch (buffer[0]){
-        case 'R': 
-	    REGISTER();
+        case 'R':
+            sscanf(&buffer[1], "%u, %lu, %u", &pid, &period, &computation);
+	    REGISTER(pid,period,computation);
 	    break;
         case 'Y':
-	    YIELD();
+	   // YIELD();
 	    break;
  	case 'D':
-	    DEREGISTRATION();
+	   // DEREGISTRATION();
 	    break;
     }
 
@@ -164,7 +167,7 @@ int __init mp1_init(void)
 {
     unsigned long currentTime;
     unsigned long expiryTime;
-    *cache = mem_cache_create("cache_name", sizeof(mp2_task_struct), 0, 0);
+    cache = kmem_cache_create("cache_name", sizeof(mp2_struct), 0, 0, NULL);
     #ifdef DEBUG
         printk(KERN_ALERT "MP1 MODULE LOADING\n");
     #endif
@@ -177,10 +180,10 @@ int __init mp1_init(void)
     currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
     expiryTime = currentTime + 5*HZ; 
     init_timer (&myTimer);
-    myTimer.function = timerFun;
+    //myTimer.function = timerFun;
     myTimer.expires = expiryTime;
     myTimer.data = 0;
-    add_timer (&myTimer);
+    //add_timer (&myTimer);
 
     return 0;   
 }
