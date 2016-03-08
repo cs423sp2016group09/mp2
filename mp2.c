@@ -1,4 +1,5 @@
 #define LINUX
+#include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
@@ -21,6 +22,7 @@ MODULE_DESCRIPTION("CS-423 MP1");
 static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
 static struct kmem_cache *cache;
+static spinlock_t mp2_spin_lock;
 #define SLEEPING 0
 #define READY 1
 #define RUNNING 2
@@ -61,9 +63,56 @@ typedef struct mp2_task_struct{
 } mp2_struct;
 
 static struct mp2_task_struct dispatch_thread;
+static struct mp2_task_struct*  current_task;
 
 static LIST_HEAD(head_task);
 static int finished_writing;
+
+static void update_tasks(){
+    struct mp2_task_struct *i;
+    list_for_each_entry(i, &head_task, task_node) {
+        if (current_task != NULL) {
+            struct sched_param sparam; 
+            sparam.sched_priority=0;    
+            sched_setscheduler(task, SCHED_NORMAL, &sparam);
+        }   
+        if (i->task->state == READY && i->relative_period < current_task->relative_period){
+             if (current_task != NULL && i != NULL && current_task->state == RUNNING){
+                spin_lock_irqsave(&mp2_spin_lock, 0);
+                current_task->state = READY;
+                spin_unlock_irqrestore(&mp2_spin_lock, 0);    
+             }
+        }
+        if (current_task == NULL || i->relative_period < current_task->relative_period) {
+            spin_lock_irqsave(&mp2_spin_lock, 0);
+            i->state = RUNNING;
+            spin_unlock_irqrestore(&mp2_spin_lock, 0);
+            
+            struct sched_param sparam; 
+            wake_up_process(i->task);
+            sparam.sched_priority=99;
+            sched_setscheduler(i->task, SCHED_FIFO, &sparam);
+            current_task = i;
+        }
+    }
+}
+static void thread_fun (){
+    for(;;){
+        update_tasks();
+        set_current_state(TASK_INTERRUPTIBLE);
+        schedule();        
+    }
+}
+
+static void wake_up_timer_handler(mp2_task_struct *task){
+    spin_lock_irqsave(&mp2_spin_lock, 0);
+    if (current_task != task){
+        task->status = READY;
+        wake_up_process(dispatch_thread);
+    }
+    spin_unlock_irqrestore(&mp2_spin_lock, 0);
+}
+
 
 static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
     int copied;
@@ -129,6 +178,22 @@ static void DEREGISTRATION(unsigned int pid){
     }	
     
 }
+
+static void YIELD(unsigned int pid){
+    mp2_struct *cursor;
+    mp2_struct *next;
+
+    list_for_each_entry_safe(cursor, next, &head_task, task_node) {
+        if (cursor->pid == pid){
+          spin_lock_irqsave(&mp2_spin_lock, 0);
+          cursor->status = SLEEPING;
+          spin_unlock_irqrestore(&mp2_spin_lock, 0);
+          set_task_state(cursor->task, TASK_UNINTERRUPTIBLE);
+          break;
+        }    
+    }
+}
+
 static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
     int copied;
     char *buf;
@@ -187,7 +252,7 @@ int __init mp1_init(void)
     unsigned long expiryTime;
     cache = kmem_cache_create("cache_name", sizeof(mp2_struct), 0, 0, NULL);
     /** does not compile, context switch undefined, TODO fix */
-    // dispatch_thread = kthread_create(context_switch,NULL,"dispatch_thread");
+
     #ifdef DEBUG
         printk(KERN_ALERT "MP1 MODULE LOADING\n");
     #endif
@@ -196,6 +261,7 @@ int __init mp1_init(void)
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp1_file); 
     
+    dispatch_thread = kthread_run(&thread_fun, NULL, "dispatch_thread");
     // set up timer interrupt
     currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
     expiryTime = currentTime + 5*HZ; 
