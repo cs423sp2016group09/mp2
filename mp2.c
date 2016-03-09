@@ -22,10 +22,12 @@ MODULE_DESCRIPTION("CS-423 MP2");
 static struct proc_dir_entry *proc_dir;
 static struct proc_dir_entry *proc_entry;
 static struct kmem_cache *cache;
-static spinlock_t mp2_spin_lock;
-#define SLEEPING 0
+static DEFINE_SPINLOCK(my_lock);
+
+#define RUNNING 0
 #define READY 1
-#define RUNNING 2
+#define SLEEPING 2
+
 #define FILENAME "status"
 #define DIRECTORY "mp2"
 #define READ_BUFFER_SIZE 1600
@@ -43,76 +45,120 @@ static LIST_HEAD(head);
 DEFINE_MUTEX(mutex_list);
 
 
-// helpers for timer code
-static struct timer_list myTimer;
-/*void timerFun (unsigned long arg) {
-    myTimer.expires = jiffies + 5*HZ;
-    add_timer (&myTimer); // setup the timer again /
-    schedule_work(&wq); // trigger the bottom half
-}
-*/
 typedef struct mp2_task_struct {
     struct task_struct *task;
     struct list_head task_node;
     struct timer_list task_timer;
+
     unsigned int state;
-    uint64_t next_period;
+
     unsigned int pid;
     unsigned long cputime;
     unsigned long period;
-    unsigned long slice;
+
 } mp2_struct;
 
 static mp2_struct dispatch_thread;
-static mp2_struct*  live_task;
+static mp2_struct* currently_running_task;
 
 static LIST_HEAD(head_task);
 static int finished_writing;
 
-static void update_tasks(void) {
+static mp2_struct *find_shortest_period(void) {
     mp2_struct *i;
-    struct sched_param sparam; 
 
+    mp2_struct *highest_priority_ready_task = NULL;
     list_for_each_entry(i, &head_task, task_node) {
-        if (live_task != NULL) {
-            sparam.sched_priority=0;    
-            sched_setscheduler(i->task, SCHED_NORMAL, &sparam);
-        }   
-        if (i->task->state == READY && i->cputime < live_task->cputime){
-             if (live_task != NULL && i != NULL && live_task->state == RUNNING){
-                // spin_lock_irqsave(&mp2_spin_lock, 0);
-                live_task->state = READY;
-                spin_unlock_irqrestore(&mp2_spin_lock, 0);    
-             }
-        }
-        if (live_task == NULL || i->cputime < live_task->cputime) {
-            // spin_lock_irqsave(&mp2_spin_lock, 0);
-            i->state = RUNNING;
-            spin_unlock_irqrestore(&mp2_spin_lock, 0);
-            
-            wake_up_process(i->task);
-            sparam.sched_priority=99;
-            sched_setscheduler(i->task, SCHED_FIFO, &sparam);
-            live_task = i;
+        if (i->state == READY) {
+            if (highest_priority_ready_task == NULL) {
+                highest_priority_ready_task = i;
+            } else {
+                if (i->period < highest_priority_ready_task->period) {
+                    highest_priority_ready_task = i;
+                }
+            }
         }
     }
+    return highest_priority_ready_task;
 }
-static int thread_fun(void *arg){
-    for(;;){
-        update_tasks();
+
+static void handle_new_running_task(void) {
+    mp2_struct *next_task;
+    
+    struct sched_param sparam;
+    struct sched_param sparam2;
+
+    next_task = find_shortest_period();
+
+    if (next_task == NULL) { // no shortest period
+        
+        if (currently_running_task != NULL) {
+            sparam2.sched_priority=0;
+            if (currently_running_task->state == RUNNING) {
+                currently_running_task->state = READY;
+            }
+            sched_setscheduler(currently_running_task->task, SCHED_NORMAL, &sparam2);
+        }
+
+    } else {
+
+        next_task->state = RUNNING;
+        wake_up_process(next_task->task);
+        sparam.sched_priority=99;
+        sched_setscheduler(next_task->task, SCHED_FIFO, &sparam);
+        
+        if (currently_running_task != NULL) {
+            sparam2.sched_priority=0;
+            if (currently_running_task->state == RUNNING) {
+                currently_running_task->state = READY;
+            }
+            sched_setscheduler(currently_running_task->task, SCHED_NORMAL, &sparam2);
+        }
+
+    }
+
+
+     
+
+    /**
+     *
+        // spin_unlock_irqrestore(&mp2_spin_lock, 0);
+     * 
+     * DEADPOOL:
+                    // if (currently_running_task != NULL && highest_priority_task_in_list != NULL && currently_running_task->state == RUNNING){
+                    //     // spin_lock_irqsave(&mp2_spin_lock, 0);
+                    //     currently_running_task->state = READY;
+                    //     spin_unlock_irqrestore(&mp2_spin_lock, 0);    
+                    // }
+
+                    // if (currently_running_task == NULL || highest_priority_task_in_list->period < currently_running_task->period) {
+                    //     // spin_lock_irqsave(&mp2_spin_lock, 0);
+                    //     currently_running_task = highest_priority_task_in_list;
+                    // }
+     */
+}
+
+static int dispatch_thread_function(void *arg){
+    while(1) { // woken up
+        printk(KERN_ALERT "WOKEN UP\n");
+        handle_new_running_task();
+        // set_current_state(TASK_INTERRUPTIBLE);
+        
         set_current_state(TASK_INTERRUPTIBLE);
+        printk(KERN_ALERT "GOING BACK TO SLEEP\n");
         schedule();        
     }
     return 0;
 }
 
-static void wake_up_timer_handler(mp2_struct *task){
-    // spin_lock_irqsave(&mp2_spin_lock, 0);
-    if (live_task != task){
-        task->state = READY;
-        // wake_up_process(dispatch_thread);
-    }
-    spin_unlock_irqrestore(&mp2_spin_lock, 0);
+static void wake_up_timer_function(unsigned long arg){
+    unsigned long flags;
+    spin_lock_irqsave(&my_lock, flags);
+
+    currently_running_task->state = READY;
+    wake_up_process(dispatch_thread.task);
+
+    spin_unlock_irqrestore(&my_lock, flags);
 }
 
 
@@ -142,7 +188,7 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
         line = kmalloc(LINE_LENGTH, GFP_KERNEL);
         memset(line, 0, LINE_LENGTH);
 
-        sprintf(line, "PID: %lu, cputime: %lu\n", i->pid, i->cputime);
+        sprintf(line, "PID: %u, cputime: %lu\n", i->pid, i->cputime);
         line_length = strlen(line);
         
         snprintf(buf_curr_pos, line_length + 1, "%s", line); // + 1 to account for the null char
@@ -187,7 +233,6 @@ static void DEREGISTRATION(unsigned int pid){
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
             list_del(&(cursor->task_node));
-            // TODO: add if we need to free the task_struct
             kmem_cache_free(cache,cursor);
             // printk(KERN_ALERT "FOUND PID and deleted!!\n");
             // break; // stop after removing first pid found
@@ -203,6 +248,11 @@ static void YIELD(unsigned int pid){
 
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
+
+            // calculate remaining time
+            // set expiry time
+            // add timer handler 
+
             // printk(KERN_ALERT "FOUND PID!!\n");
             // spin_lock_irqsave(&mp2_spin_lock, 0);
             // cursor->state = SLEEPING;
@@ -216,12 +266,12 @@ static void YIELD(unsigned int pid){
 static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
     int copied;
     char *buf;
-    list_node *new_node;
+
     unsigned int pid;
     unsigned long period;
     unsigned long computation;
     
-    printk(KERN_ALERT "mp2_write called with %u bytes\n", count);
+    printk(KERN_ALERT "mp2_write called with %zu bytes\n", count);
     // manually null terminate
     buf = (char *) kmalloc(count+1,GFP_KERNEL); 
     copied = copy_from_user(buf, buffer, count);
@@ -264,8 +314,8 @@ static const struct file_operations mp2_file = {
 // mp2_init - Called when module is loaded
 int __init mp2_init(void)
 {
-    unsigned long currentTime;
-    unsigned long expiryTime;
+    // unsigned long currentTime;
+    // unsigned long expiryTime;
     cache = kmem_cache_create("cache_name", sizeof(mp2_struct), 0, 0, NULL);
     /** does not compile, context switch undefined, TODO fix */
 
@@ -277,15 +327,16 @@ int __init mp2_init(void)
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp2_file); 
     
-    dispatch_thread.task = kthread_run(&thread_fun, NULL, "dispatch_thread");
+    dispatch_thread.task = kthread_run(&dispatch_thread_function, NULL, "dispatch_thread");
     // set up timer interrupt
+ 
     // currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
     // expiryTime = currentTime + 5*HZ; 
     // init_timer (&myTimer);
-    // //myTimer.function = timerFun;
+    // myTimer.function = wake_up_timer_function;
     // myTimer.expires = expiryTime;
     // myTimer.data = 0;
-    //add_timer (&myTimer);
+    // add_timer (&myTimer);
 
     return 0;   
 }
