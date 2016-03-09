@@ -167,7 +167,9 @@ static void REGISTER(unsigned int pid, unsigned long period, unsigned long compu
     mp2_task->cputime = computation;
     mp2_task->period = period; 
     // TODO to add computation
-    // mp2_task->task->state = SLEEPING;
+    mp2_task->task = find_task_by_pid(pid);
+    mp2_task->task->state = SLEEPING;
+    printk(KERN_ALERT "successfully set task structure to sleeping\n");
     list_add(&(mp2_task->task_node), &head_task);
 
     // mp2_struct *cursor;
