@@ -70,6 +70,7 @@ static mp2_struct *find_shortest_period(void) {
     mp2_struct *i;
 
     mp2_struct *highest_priority_ready_task = NULL;
+    mutex_lock_interruptible(&mutex_list);
     list_for_each_entry(i, &head_task, task_node) {
         if (i->state == READY) {
             if (highest_priority_ready_task == NULL) {
@@ -81,6 +82,7 @@ static mp2_struct *find_shortest_period(void) {
             }
         }
     }
+    mutex_unlock(&mutex_list);
     return highest_priority_ready_task;
 }
 
@@ -215,10 +217,12 @@ static int admission_control(unsigned long new_task_period, unsigned long new_ta
     new_task_ratio = 1000 * new_task_cputime / new_task_period;
 
     existing_ratio_sum = 0;
+    mutex_lock_interruptible(&mutex_list);
     list_for_each_entry(i, &head_task, task_node) {
         task_ratio = 1000 * i->cputime / i->period;
         existing_ratio_sum += task_ratio;
     }
+    mutex_unlock(&mutex_list);
 
     return existing_ratio_sum + new_task_ratio <= 693;
 }
@@ -271,15 +275,17 @@ static void DEREGISTRATION(unsigned int pid){
     mp2_struct *cursor;
     mp2_struct *next;
 
+    mutex_lock_interruptible(&mutex_list);
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
+            del_timer(&(cursor->task_timer));
             list_del(&(cursor->task_node));
             kmem_cache_free(cache,cursor);
             // printk(KERN_ALERT "FOUND PID and deleted!!\n");
             // break; // stop after removing first pid found
         }    
     }   
-    
+    mutex_unlock(&mutex_list);
 }
 
 static void YIELD(unsigned int pid){
@@ -288,6 +294,7 @@ static void YIELD(unsigned int pid){
     mp2_struct *next;
     unsigned long now;
 
+    mutex_lock_interruptible(&mutex_list);
     list_for_each_entry_safe(i, next, &head_task, task_node) {
         if (i->pid == pid){
             now = jiffies_to_msecs(jiffies);
@@ -309,6 +316,7 @@ static void YIELD(unsigned int pid){
             // break;
         }    
     }
+    mutex_unlock(&mutex_list);
 }
 
 static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
@@ -405,10 +413,12 @@ void __exit mp2_exit(void)
     // del_timer (&myTimer);
 
     // remove list node from list, free the wrapping struct
+    mutex_lock_interruptible(&mutex_list);
     list_for_each_entry_safe(cursor, next, &head, list) {
         list_del(&(cursor->list));
         kfree(cursor);
     }
+    mutex_unlock(&mutex_list);
 
     #ifdef DEBUG
         printk(KERN_ALERT "MP2 MODULE UNLOADED\n");
