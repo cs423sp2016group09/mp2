@@ -50,6 +50,8 @@ typedef struct mp2_task_struct {
     struct list_head task_node;
     struct timer_list task_timer;
 
+    unsigned long deadline;
+
     unsigned int state;
 
     unsigned int pid;
@@ -203,22 +205,61 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
     kfree(buf);
     return READ_BUFFER_SIZE;
 }
-static void REGISTER(unsigned int pid, unsigned long period, unsigned long computation){
-    mp2_struct *mp2_task;
+
+static int admission_control(unsigned long new_task_period, unsigned long new_task_cputime) {
+    unsigned long existing_ratio_sum;
+    unsigned long task_ratio;
+    unsigned long new_task_ratio;
+    mp2_struct *i;
+
+    new_task_ratio = 1000 * new_task_cputime / new_task_period;
+
+    existing_ratio_sum = 0;
+    list_for_each_entry(i, &head_task, task_node) {
+        task_ratio = 1000 * i->cputime / i->period;
+        existing_ratio_sum += task_ratio;
+    }
+
+    return existing_ratio_sum + new_task_ratio <= 693;
+}
+
+static void REGISTER(unsigned int pid, unsigned long period, unsigned long cputime) {
+    mp2_struct *new_task;
+    int passes_admission_control;
+    // admission control
+    passes_admission_control = admission_control(period, cputime);
+
+    if (!passes_admission_control) {
+        return;
+    }
+
     // allocate mp2_struct
-    mp2_task = kmem_cache_alloc(cache,0);
-    if (mp2_task == NULL) {
+    new_task = kmem_cache_alloc(cache,0);
+    if (new_task == NULL) {
         printk(KERN_ALERT "GOT A NULLPTR FROM kmem_cache_alloc\n");
     }
     // initialize mp2_struct
-    mp2_task->pid = pid;
-    mp2_task->cputime = computation;
-    mp2_task->period = period; 
-    mp2_task->task = find_task_by_pid(pid);
-    mp2_task->task->state = SLEEPING;
+    new_task->pid = pid;
+    new_task->cputime = cputime;
+    new_task->period = period; 
+
+    new_task->state = SLEEPING;
+    
+    new_task->task_timer.function = wake_up_timer_function;
+    new_task->task_timer.data = 0;
+    // time_t start, end, time_diff;
+
+    // time(&start);
+    // time(&end);
+
+    // time_diff = difftime(end, start);
+    
+    new_task->deadline = jiffies_to_msecs(jiffies) + new_task->period;
+
+    new_task->task = find_task_by_pid(pid);
 
     // printk(KERN_ALERT "successfully set task structure to sleeping\n");
-    list_add(&(mp2_task->task_node), &head_task);
+    list_add(&(new_task->task_node), &head_task);
 
     // mp2_struct *cursor;
     // mp2_struct *next;
@@ -243,21 +284,28 @@ static void DEREGISTRATION(unsigned int pid){
 
 static void YIELD(unsigned int pid){
     // printk(KERN_ALERT "YIELDING for pid: %u\n", pid);
-    mp2_struct *cursor;
+    mp2_struct *i;
     mp2_struct *next;
+    unsigned long now;
 
-    list_for_each_entry_safe(cursor, next, &head_task, task_node) {
-        if (cursor->pid == pid){
+    list_for_each_entry_safe(i, next, &head_task, task_node) {
+        if (i->pid == pid){
+            now = jiffies_to_msecs(jiffies);
 
-            // calculate remaining time
-            // set expiry time
-            // add timer handler 
-
+            if (now < i->deadline) {
+                i->state = SLEEPING;
+                // calculate remaining time
+                i->deadline += i->period;
+                // set expiry time
+                i->task_timer.expires = msecs_to_jiffies(i->deadline);
+                add_timer (&i->task_timer);
+            } else { // missed our deadline
+                i->deadline += i->period;
+            }
             // printk(KERN_ALERT "FOUND PID!!\n");
             // spin_lock_irqsave(&mp2_spin_lock, 0);
-            // cursor->state = SLEEPING;
             // spin_unlock_irqrestore(&mp2_spin_lock, 0);
-            // set_task_state(cursor->task, TASK_UNINTERRUPTIBLE);
+            // set_task_state(i->task, TASK_UNINTERRUPTIBLE);
             // break;
         }    
     }
@@ -269,7 +317,7 @@ static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t c
 
     unsigned int pid;
     unsigned long period;
-    unsigned long computation;
+    unsigned long cputime;
     
     printk(KERN_ALERT "mp2_write called with %zu bytes\n", count);
     // manually null terminate
@@ -283,11 +331,11 @@ static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t c
             case 'R':
                 // printk(KERN_ALERT "GOT REGISTRATION MESSAGE\n");
                 // printk(KERN_ALERT "string: %s\n", buf);
-                sscanf(buf + 3, "%u, %lu, %lu\n", &pid, &period, &computation);
+                sscanf(buf + 3, "%u, %lu, %lu\n", &pid, &period, &cputime);
 
-                // printk(KERN_ALERT "WE GOD DIS : pid %u perid %lu comp %lu\n", pid, period, computation);
+                // printk(KERN_ALERT "WE GOD DIS : pid %u perid %lu comp %lu\n", pid, period, cputime);
                 // printk(KERN_ALERT "CALLING REGISTER()\n");
-                REGISTER(pid,period,computation);
+                REGISTER(pid,period,cputime);
                 break;
             case 'Y':
                 // printk(KERN_ALERT "GOT YIELD MESSAGE\n");
@@ -314,8 +362,7 @@ static const struct file_operations mp2_file = {
 // mp2_init - Called when module is loaded
 int __init mp2_init(void)
 {
-    // unsigned long currentTime;
-    // unsigned long expiryTime;
+
     cache = kmem_cache_create("cache_name", sizeof(mp2_struct), 0, 0, NULL);
     /** does not compile, context switch undefined, TODO fix */
 
