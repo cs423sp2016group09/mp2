@@ -8,7 +8,7 @@
 
 #define SIZE 1024
 
-const float MIN_CPU_TIME = 167.448;
+const float MIN_CPU_TIME = 167.94;
 
 static int pid;
 static FILE * statusfile;
@@ -84,66 +84,65 @@ int process_in_list() {
 }
 
 int main(int argc, char* argv[]) {
-    // // get pid 
-    // pid = getpid();
-    // // write pid as a string to the proc filesystem
+    // get pid 
+    pid = getpid();
+    // write pid as a string to the proc filesystem
 
-    // if (argc != 3) {
-    //     perror("usage: ./userapp period job_process_time (times in milliseconds)");
-    //     exit(1);
-    // }
+    if (argc != 3) {
+        perror("usage: ./userapp period job_process_time (times in milliseconds)");
+        exit(1);
+    }
 
-    // unsigned long period = strtoul(argv[1], NULL, 10);
-    // unsigned int job_process_time = strtoul(argv[2], NULL, 10);
+    unsigned long period = strtoul(argv[1], NULL, 10);
+    unsigned int job_process_time = strtoul(argv[2], NULL, 10);
 
-    // if (job_process_time < MIN_CPU_TIME) {
-    //     perror("Job process time must be at least 167.448 ms");
-    //     exit(1);
-    // }
+    if (job_process_time < MIN_CPU_TIME) {
+        perror("Job process time must be at least 167.94 ms");
+        exit(1);
+    }
 
-    // if (job_process_time > period) {
-    //     perror("Period must be bigger than job process time.");
-    //     exit(1);
-    // }
+    if (job_process_time > period) {
+        perror("Period must be bigger than job process time.");
+        exit(1);
+    }
 
-    // REGISTER(period, job_process_time);
+    REGISTER(period, job_process_time);
 
-    // int in_list = process_in_list();
+    int in_list = process_in_list();
 
-    // // passed registration successfully
-    // if (!in_list) {
-    //     perror("Process rejected by admission control.");
-    //     exit(1);
-    // }
+    // passed registration successfully
+    if (!in_list) {
+        perror("Process rejected by admission control.");
+        exit(1);
+    }
 
-    // YIELD();
+    YIELD();
 
-    struct timeval start, end;
-    long unsigned secs_used,micros_used;
+    // struct timeval start, end;
+    // long unsigned secs_used,micros_used;
 
-    gettimeofday(&start, NULL);
+    // gettimeofday(&start, NULL);
     
     int j;
     for (j=0; j < 100; j++) { // while exist jobs
         do_job();
-        // YIELD();
+        YIELD();
     }
 
-    gettimeofday(&end, NULL);
+    // gettimeofday(&end, NULL);
 
-    printf("start: %lu secs, %lu usecs\n",start.tv_sec,start.tv_usec);
-    printf("end: %lu secs, %lu usecs\n",end.tv_sec,end.tv_usec);
+    // printf("start: %lu secs, %lu usecs\n",start.tv_sec,start.tv_usec);
+    // printf("end: %lu secs, %lu usecs\n",end.tv_sec,end.tv_usec);
 
-    secs_used=(end.tv_sec - start.tv_sec); //avoid overflow by subtracting first
-    micros_used= ((secs_used*1000000) + end.tv_usec) - (start.tv_usec);
+    // secs_used=(end.tv_sec - start.tv_sec); //avoid overflow by subtracting first
+    // micros_used= ((secs_used*1000000) + end.tv_usec) - (start.tv_usec);
 
-    printf("micros_used: %lu\n",micros_used);
-    printf("millis_used: %lu\n",micros_used / 1000);
+    // printf("micros_used: %lu\n",micros_used);
+    // printf("millis_used: %lu\n",micros_used / 1000);
 
-    printf("avg time: %G\n",micros_used / 1000 / 100.0);
+    // printf("avg time: %G\n",micros_used / 1000 / 100.0);
 
-    // DEREGISTER();
-
+    DEREGISTER();
 
     return 0;
 }
