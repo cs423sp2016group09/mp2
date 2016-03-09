@@ -58,7 +58,8 @@ typedef struct mp2_task_struct {
     unsigned int state;
     uint64_t next_period;
     unsigned int pid;
-    unsigned long relative_period;
+    unsigned long cputime;
+    unsigned long period;
     unsigned long slice;
 } mp2_struct;
 
@@ -77,14 +78,14 @@ static void update_tasks(void) {
             sparam.sched_priority=0;    
             sched_setscheduler(i->task, SCHED_NORMAL, &sparam);
         }   
-        if (i->task->state == READY && i->relative_period < live_task->relative_period){
+        if (i->task->state == READY && i->cputime < live_task->cputime){
              if (live_task != NULL && i != NULL && live_task->state == RUNNING){
                 // spin_lock_irqsave(&mp2_spin_lock, 0);
                 live_task->state = READY;
                 spin_unlock_irqrestore(&mp2_spin_lock, 0);    
              }
         }
-        if (live_task == NULL || i->relative_period < live_task->relative_period) {
+        if (live_task == NULL || i->cputime < live_task->cputime) {
             // spin_lock_irqsave(&mp2_spin_lock, 0);
             i->state = RUNNING;
             spin_unlock_irqrestore(&mp2_spin_lock, 0);
@@ -141,7 +142,7 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
         line = kmalloc(LINE_LENGTH, GFP_KERNEL);
         memset(line, 0, LINE_LENGTH);
 
-        sprintf(line, "PID: %lu, relative_period: %lu\n", i->pid, i->relative_period);
+        sprintf(line, "PID: %lu, cputime: %lu\n", i->pid, i->cputime);
         line_length = strlen(line);
         
         snprintf(buf_curr_pos, line_length + 1, "%s", line); // + 1 to account for the null char
@@ -159,12 +160,21 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
 static void REGISTER(unsigned int pid, unsigned long period, unsigned long computation){
     mp2_struct *mp2_task;
     mp2_task = kmem_cache_alloc(cache,0);
+    if (mp2_task == NULL) {
+        printk(KERN_ALERT "GOT A NULLPTR FROM kmem_cache_alloc\n");
+    }
     mp2_task->pid = pid;
-    mp2_task->relative_period = period; 
-    //TO DO to add computation
-    mp2_task->task->state = SLEEPING;
+    mp2_task->cputime = computation;
+    mp2_task->period = period; 
+    // TODO to add computation
+    // mp2_task->task->state = SLEEPING;
     list_add(&(mp2_task->task_node), &head_task);
 
+    // mp2_struct *cursor;
+    // mp2_struct *next;
+    // list_for_each_entry_safe(cursor, next, &head_task, task_node) {
+    //     printk(KERN_ALERT "have pid: %u, cputime: %lu, period: %lu\n", cursor->pid, cursor->cputime, cursor->period);
+    // }
 }
 static void DEREGISTRATION(unsigned int pid){
     mp2_struct *cursor;
@@ -172,25 +182,28 @@ static void DEREGISTRATION(unsigned int pid){
 
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
-          list_del(&(cursor->task_node));
- 	      kmem_cache_free(cache,cursor);
-          break;
-	    }    
-    }	
+            list_del(&(cursor->task_node));
+            kmem_cache_free(cache,cursor);
+            // printk(KERN_ALERT "FOUND PID and deleted!!\n");
+            break; // stop after removing first pid found
+        }    
+    }   
     
 }
 
 static void YIELD(unsigned int pid){
+    // printk(KERN_ALERT "YIELDING for pid: %u\n", pid);
     mp2_struct *cursor;
     mp2_struct *next;
 
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
-          // spin_lock_irqsave(&mp2_spin_lock, 0);
-          cursor->state = SLEEPING;
-          spin_unlock_irqrestore(&mp2_spin_lock, 0);
-          set_task_state(cursor->task, TASK_UNINTERRUPTIBLE);
-          break;
+            // printk(KERN_ALERT "FOUND PID!!\n");
+            // spin_lock_irqsave(&mp2_spin_lock, 0);
+            // cursor->state = SLEEPING;
+            // spin_unlock_irqrestore(&mp2_spin_lock, 0);
+            // set_task_state(cursor->task, TASK_UNINTERRUPTIBLE);
+            // break;
         }    
     }
 }
@@ -203,40 +216,37 @@ static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t c
     unsigned long period;
     unsigned long computation;
     
-    char cmd = buffer[0]; 
-    switch (cmd){
-        case 'R':
-            sscanf(buffer + 3, "%u, %lu, %lu", &pid, &period, &computation);
-	        REGISTER(pid,period,computation);
-	        break;
-        case 'Y':
-	        // YIELD();
-	        break;
- 	    case 'D':
-            sscanf(buffer + 3, "%u", &pid);
-	        DEREGISTRATION(pid);
-	        break;
-    }
-
+    printk(KERN_ALERT "mp2_write called with %u bytes\n", count);
     // manually null terminate
     buf = (char *) kmalloc(count+1,GFP_KERNEL); 
     copied = copy_from_user(buf, buffer, count);
     buf[count]=0;
 
-    // get pid from char *
-    kstrtoint(buf, 10, &pid);
+    if (count > 0) {
+        char cmd = buf[0];
+        switch (cmd){
+            case 'R':
+                // printk(KERN_ALERT "GOT REGISTRATION MESSAGE\n");
+                // printk(KERN_ALERT "string: %s\n", buf);
+                sscanf(buf + 3, "%u, %lu, %lu\n", &pid, &period, &computation);
 
-    // create neew node
-    new_node = kmalloc(sizeof(list_node), GFP_KERNEL);
-    memset(new_node, 0, sizeof(list_node));
-    new_node->pid = pid;
+                // printk(KERN_ALERT "WE GOD DIS : pid %u perid %lu comp %lu\n", pid, period, computation);
+                // printk(KERN_ALERT "CALLING REGISTER()\n");
+                REGISTER(pid,period,computation);
+                break;
+            case 'Y':
+                // printk(KERN_ALERT "GOT YIELD MESSAGE\n");
+                sscanf(buf + 3, "%u\n", &pid);
+                YIELD(pid);
+                break;
+            case 'D':
+                sscanf(buf + 3, "%u\n", &pid);
+                DEREGISTRATION(pid);
+                break;
+        }
 
-    // put the node in the linked list
-    mutex_lock_interruptible(&mutex_list);
-    list_add(&(new_node->list), &head);
-    mutex_unlock(&mutex_list);
-
-    kfree(buf);
+        kfree(buf);
+    }
     return count;
 }
 
@@ -283,15 +293,15 @@ void __exit mp2_exit(void)
     #ifdef DEBUG
         printk(KERN_ALERT "MP2 MODULE UNLOADING\n");
     #endif
-	
-	// remove the procfs entry first so that users can't access it while we're deleting the list
+    
+    // remove the procfs entry first so that users can't access it while we're deleting the list
     proc_remove(proc_entry);
     proc_remove(proc_dir);
     
     // kill the timer
     // del_timer (&myTimer);
 
-	// remove list node from list, free the wrapping struct
+    // remove list node from list, free the wrapping struct
     list_for_each_entry_safe(cursor, next, &head, list) {
         list_del(&(cursor->list));
         kfree(cursor);
