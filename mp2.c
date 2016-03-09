@@ -26,7 +26,7 @@ static spinlock_t mp2_spin_lock;
 #define SLEEPING 0
 #define READY 1
 #define RUNNING 2
-#define FILENAME "status"
+#define FILENAME "state"
 #define DIRECTORY "mp1"
 #define READ_BUFFER_SIZE 1600
 #define LINE_LENGTH 80
@@ -51,64 +51,65 @@ static struct timer_list myTimer;
     schedule_work(&wq); // trigger the bottom half
 }
 */
-typedef struct mp2_task_struct{
+typedef struct mp2_task_struct {
     struct task_struct *task;
     struct list_head task_node;
     struct timer_list task_timer;
-    unsigned int task_state;
+    unsigned int state;
     uint64_t next_period;
     unsigned int pid;
     unsigned long relative_period;
     unsigned long slice;
 } mp2_struct;
 
-static struct mp2_task_struct dispatch_thread;
-static struct mp2_task_struct*  current_task;
+static mp2_struct dispatch_thread;
+static mp2_struct*  live_task;
 
 static LIST_HEAD(head_task);
 static int finished_writing;
 
-static void update_tasks(){
-    struct mp2_task_struct *i;
+static void update_tasks(void) {
+    mp2_struct *i;
+    struct sched_param sparam; 
+
     list_for_each_entry(i, &head_task, task_node) {
-        if (current_task != NULL) {
-            struct sched_param sparam; 
+        if (live_task != NULL) {
             sparam.sched_priority=0;    
-            sched_setscheduler(task, SCHED_NORMAL, &sparam);
+            sched_setscheduler(i->task, SCHED_NORMAL, &sparam);
         }   
-        if (i->task->state == READY && i->relative_period < current_task->relative_period){
-             if (current_task != NULL && i != NULL && current_task->state == RUNNING){
-                spin_lock_irqsave(&mp2_spin_lock, 0);
-                current_task->state = READY;
+        if (i->task->state == READY && i->relative_period < live_task->relative_period){
+             if (live_task != NULL && i != NULL && live_task->state == RUNNING){
+                // spin_lock_irqsave(&mp2_spin_lock, 0);
+                live_task->state = READY;
                 spin_unlock_irqrestore(&mp2_spin_lock, 0);    
              }
         }
-        if (current_task == NULL || i->relative_period < current_task->relative_period) {
-            spin_lock_irqsave(&mp2_spin_lock, 0);
+        if (live_task == NULL || i->relative_period < live_task->relative_period) {
+            // spin_lock_irqsave(&mp2_spin_lock, 0);
             i->state = RUNNING;
             spin_unlock_irqrestore(&mp2_spin_lock, 0);
             
-            struct sched_param sparam; 
             wake_up_process(i->task);
             sparam.sched_priority=99;
             sched_setscheduler(i->task, SCHED_FIFO, &sparam);
-            current_task = i;
+            live_task = i;
         }
     }
 }
-static void thread_fun (){
+static int thread_fun(void *arg){
     for(;;){
         update_tasks();
         set_current_state(TASK_INTERRUPTIBLE);
         schedule();        
     }
+    return 0;
 }
 
-static void wake_up_timer_handler(mp2_task_struct *task){
-    spin_lock_irqsave(&mp2_spin_lock, 0);
-    if (current_task != task){
-        task->status = READY;
-        wake_up_process(dispatch_thread);
+static void wake_up_timer_handler(mp2_struct *task){
+    // spin_lock_irqsave(&mp2_spin_lock, 0);
+    if (live_task != task){
+        task->state = READY;
+        // wake_up_process(dispatch_thread);
     }
     spin_unlock_irqrestore(&mp2_spin_lock, 0);
 }
@@ -120,7 +121,7 @@ static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, l
     char * line;
     int line_length;
     char * buf_curr_pos;
-    struct mp2_task_struct *i;
+    mp2_struct *i;
 
     // must return 0 to signal that we're done writing to cat
     if (finished_writing == 1) {
@@ -156,7 +157,7 @@ static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, l
     return READ_BUFFER_SIZE;
 }
 static void REGISTER(unsigned int pid, unsigned long period, unsigned int computation){
-    struct mp2_task_struct *mp2_task;
+    mp2_struct *mp2_task;
     mp2_task = kmem_cache_alloc(cache,0);
     mp2_task->pid = pid;
     mp2_task->relative_period = period; 
@@ -185,8 +186,8 @@ static void YIELD(unsigned int pid){
 
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
-          spin_lock_irqsave(&mp2_spin_lock, 0);
-          cursor->status = SLEEPING;
+          // spin_lock_irqsave(&mp2_spin_lock, 0);
+          cursor->state = SLEEPING;
           spin_unlock_irqrestore(&mp2_spin_lock, 0);
           set_task_state(cursor->task, TASK_UNINTERRUPTIBLE);
           break;
@@ -261,7 +262,7 @@ int __init mp1_init(void)
     proc_dir = proc_mkdir(DIRECTORY, NULL);
     proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp1_file); 
     
-    dispatch_thread = kthread_run(&thread_fun, NULL, "dispatch_thread");
+    dispatch_thread.task = kthread_run(&thread_fun, NULL, "dispatch_thread");
     // set up timer interrupt
     currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
     expiryTime = currentTime + 5*HZ; 
