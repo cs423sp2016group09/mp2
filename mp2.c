@@ -16,7 +16,7 @@
 
 MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Group_09");
-MODULE_DESCRIPTION("CS-423 MP1");
+MODULE_DESCRIPTION("CS-423 MP2");
 
 #define DEBUG 1
 static struct proc_dir_entry *proc_dir;
@@ -27,7 +27,7 @@ static spinlock_t mp2_spin_lock;
 #define READY 1
 #define RUNNING 2
 #define FILENAME "state"
-#define DIRECTORY "mp1"
+#define DIRECTORY "mp2"
 #define READ_BUFFER_SIZE 1600
 #define LINE_LENGTH 80
 
@@ -115,7 +115,7 @@ static void wake_up_timer_handler(mp2_struct *task){
 }
 
 
-static ssize_t mp1_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
+static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
     int copied;
     char * buf;
     char * line;
@@ -195,7 +195,7 @@ static void YIELD(unsigned int pid){
     }
 }
 
-static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
+static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t count, loff_t *data){ 
     int copied;
     char *buf;
     list_node *new_node;
@@ -240,14 +240,14 @@ static ssize_t mp1_write (struct file *file, const char __user *buffer, size_t c
     return count;
 }
 
-static const struct file_operations mp1_file = {
+static const struct file_operations mp2_file = {
     .owner = THIS_MODULE, 
-    .read = mp1_read,
-    .write = mp1_write,
+    .read = mp2_read,
+    .write = mp2_write,
 };
 
-// mp1_init - Called when module is loaded
-int __init mp1_init(void)
+// mp2_init - Called when module is loaded
+int __init mp2_init(void)
 {
     unsigned long currentTime;
     unsigned long expiryTime;
@@ -255,12 +255,12 @@ int __init mp1_init(void)
     /** does not compile, context switch undefined, TODO fix */
 
     #ifdef DEBUG
-        printk(KERN_ALERT "MP1 MODULE LOADING\n");
+        printk(KERN_ALERT "MP2 MODULE LOADING\n");
     #endif
 
     // set up procfs
     proc_dir = proc_mkdir(DIRECTORY, NULL);
-    proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp1_file); 
+    proc_entry = proc_create(FILENAME, 0666, proc_dir, & mp2_file); 
     
     dispatch_thread.task = kthread_run(&thread_fun, NULL, "dispatch_thread");
     // set up timer interrupt
@@ -275,13 +275,13 @@ int __init mp1_init(void)
     return 0;   
 }
 
-// mp1_exit - Called when module is unloaded
-void __exit mp1_exit(void)
+// mp2_exit - Called when module is unloaded
+void __exit mp2_exit(void)
 {
     list_node *cursor;
     list_node *next;
     #ifdef DEBUG
-        printk(KERN_ALERT "MP1 MODULE UNLOADING\n");
+        printk(KERN_ALERT "MP2 MODULE UNLOADING\n");
     #endif
 	
 	// remove the procfs entry first so that users can't access it while we're deleting the list
@@ -298,10 +298,10 @@ void __exit mp1_exit(void)
     }
 
     #ifdef DEBUG
-        printk(KERN_ALERT "MP1 MODULE UNLOADED\n");
+        printk(KERN_ALERT "MP2 MODULE UNLOADED\n");
     #endif
 }
 
 // Register init and exit funtions
-module_init(mp1_init);
-module_exit(mp1_exit);
+module_init(mp2_init);
+module_exit(mp2_exit);
