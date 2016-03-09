@@ -159,16 +159,18 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
 }
 static void REGISTER(unsigned int pid, unsigned long period, unsigned long computation){
     mp2_struct *mp2_task;
+    // allocate mp2_struct
     mp2_task = kmem_cache_alloc(cache,0);
     if (mp2_task == NULL) {
         printk(KERN_ALERT "GOT A NULLPTR FROM kmem_cache_alloc\n");
     }
+    // initialize mp2_struct
     mp2_task->pid = pid;
     mp2_task->cputime = computation;
     mp2_task->period = period; 
-    // TODO to add computation
     mp2_task->task = find_task_by_pid(pid);
     mp2_task->task->state = SLEEPING;
+    
     printk(KERN_ALERT "successfully set task structure to sleeping\n");
     list_add(&(mp2_task->task_node), &head_task);
 
