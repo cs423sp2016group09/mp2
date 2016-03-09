@@ -170,8 +170,8 @@ static void REGISTER(unsigned int pid, unsigned long period, unsigned long compu
     mp2_task->period = period; 
     mp2_task->task = find_task_by_pid(pid);
     mp2_task->task->state = SLEEPING;
-    
-    printk(KERN_ALERT "successfully set task structure to sleeping\n");
+
+    // printk(KERN_ALERT "successfully set task structure to sleeping\n");
     list_add(&(mp2_task->task_node), &head_task);
 
     // mp2_struct *cursor;
@@ -187,9 +187,10 @@ static void DEREGISTRATION(unsigned int pid){
     list_for_each_entry_safe(cursor, next, &head_task, task_node) {
         if (cursor->pid == pid){
             list_del(&(cursor->task_node));
+            // TODO: add if we need to free the task_struct
             kmem_cache_free(cache,cursor);
             // printk(KERN_ALERT "FOUND PID and deleted!!\n");
-            break; // stop after removing first pid found
+            // break; // stop after removing first pid found
         }    
     }   
     
