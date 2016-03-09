@@ -26,7 +26,7 @@ static spinlock_t mp2_spin_lock;
 #define SLEEPING 0
 #define READY 1
 #define RUNNING 2
-#define FILENAME "state"
+#define FILENAME "status"
 #define DIRECTORY "mp2"
 #define READ_BUFFER_SIZE 1600
 #define LINE_LENGTH 80
@@ -141,7 +141,7 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
         line = kmalloc(LINE_LENGTH, GFP_KERNEL);
         memset(line, 0, LINE_LENGTH);
 
-        sprintf(line, "PID: %d, relative_period: %lu\n", i->pid, i->relative_period);
+        sprintf(line, "PID: %lu, relative_period: %lu\n", i->pid, i->relative_period);
         line_length = strlen(line);
         
         snprintf(buf_curr_pos, line_length + 1, "%s", line); // + 1 to account for the null char
@@ -156,7 +156,7 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
     kfree(buf);
     return READ_BUFFER_SIZE;
 }
-static void REGISTER(unsigned int pid, unsigned long period, unsigned int computation){
+static void REGISTER(unsigned int pid, unsigned long period, unsigned long computation){
     mp2_struct *mp2_task;
     mp2_task = kmem_cache_alloc(cache,0);
     mp2_task->pid = pid;
@@ -201,12 +201,12 @@ static ssize_t mp2_write (struct file *file, const char __user *buffer, size_t c
     list_node *new_node;
     unsigned int pid;
     unsigned long period;
-    unsigned int computation;
+    unsigned long computation;
     
     char cmd = buffer[0]; 
     switch (cmd){
         case 'R':
-            sscanf(buffer + 3, "%u, %lu, %u", &pid, &period, &computation);
+            sscanf(buffer + 3, "%u, %lu, %lu", &pid, &period, &computation);
 	        REGISTER(pid,period,computation);
 	        break;
         case 'Y':
@@ -264,12 +264,12 @@ int __init mp2_init(void)
     
     dispatch_thread.task = kthread_run(&thread_fun, NULL, "dispatch_thread");
     // set up timer interrupt
-    currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
-    expiryTime = currentTime + 5*HZ; 
-    init_timer (&myTimer);
-    //myTimer.function = timerFun;
-    myTimer.expires = expiryTime;
-    myTimer.data = 0;
+    // currentTime = jiffies; // pre-defined kernel variable jiffies gives current value of ticks
+    // expiryTime = currentTime + 5*HZ; 
+    // init_timer (&myTimer);
+    // //myTimer.function = timerFun;
+    // myTimer.expires = expiryTime;
+    // myTimer.data = 0;
     //add_timer (&myTimer);
 
     return 0;   
@@ -289,7 +289,7 @@ void __exit mp2_exit(void)
     proc_remove(proc_dir);
     
     // kill the timer
-    del_timer (&myTimer);
+    // del_timer (&myTimer);
 
 	// remove list node from list, free the wrapping struct
     list_for_each_entry_safe(cursor, next, &head, list) {
