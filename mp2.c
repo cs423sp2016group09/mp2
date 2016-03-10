@@ -289,10 +289,13 @@ static void DEREGISTRATION(unsigned int pid){
 }
 
 static void YIELD(unsigned int pid){
-    // printk(KERN_ALERT "YIELDING for pid: %u\n", pid);
+    //printk(KERN_ALERT "YIELDING for pid: %u\n", pid);
     mp2_struct *i;
     mp2_struct *next;
     unsigned long now;
+    struct sched_param sparam;
+
+
 
     mutex_lock_interruptible(&mutex_list);
     list_for_each_entry_safe(i, next, &head_task, task_node) {
@@ -306,6 +309,10 @@ static void YIELD(unsigned int pid){
                 // set expiry time
                 i->task_timer.expires = msecs_to_jiffies(i->deadline);
                 add_timer (&i->task_timer);
+		set_task_state(i->task, TASK_UNINTERRUPTIBLE);
+		sparam.sched_priority = 0;
+		sched_setscheduler(&dispatch_thread, SCHED_NORMAL, &sparam);
+		schedule();
             } else { // missed our deadline
                 i->deadline += i->period;
             }
