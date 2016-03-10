@@ -34,7 +34,7 @@ static DEFINE_SPINLOCK(my_lock);
 #define LINE_LENGTH 80
 
 static LIST_HEAD(head);
-DEFINE_MUTEX(mutex_list);
+static DEFINE_MUTEX(mutex_list);
 
 
 typedef struct mp2_task_struct {
@@ -124,12 +124,14 @@ static int dispatch_thread_function(void *arg){
             currently_running_task = next_task;
             next_task->state = RUNNING;
             wake_up_process(next_task->task);
-            sparam.sched_priority=99;
+            sparam.sched_priority=90;
             sched_setscheduler(next_task->task, SCHED_FIFO, &sparam);
 
         }
         
         // use set_current_state and schedule to put the dispatching thread to sleep
+        sparam.sched_priority=0;
+        sched_setscheduler(dispatch_thread.task, SCHED_NORMAL, &sparam);
         set_current_state(TASK_INTERRUPTIBLE);
         schedule();        
         printk(KERN_ALERT "Put dispatching thread to sleep\n");
@@ -139,17 +141,19 @@ static int dispatch_thread_function(void *arg){
 
 static void wake_up_timer_function(unsigned long arg){
     unsigned long flags;
-
-    printk(KERN_ALERT "Timer bell rung!\n");
+    
+    struct sched_param sparam;
 
     mp2_struct *waking_task = (mp2_struct *)arg;
-    printk(KERN_ALERT "I belong to %u!\n", waking_task->pid);
+    printk(KERN_ALERT "Timer bell rung! \t I belong to %u!\n", waking_task->pid);
     spin_lock_irqsave(&my_lock, flags);
     waking_task->state = READY;
     spin_unlock_irqrestore(&my_lock, flags);
 
     printk(KERN_ALERT "Waking up dispatch\n");
     wake_up_process(dispatch_thread.task);
+    sparam.sched_priority=99;
+    sched_setscheduler(dispatch_thread.task, SCHED_FIFO, &sparam);
 }
 
 
@@ -236,32 +240,13 @@ static void YIELD(unsigned int pid){
 
     printk(KERN_ALERT "YIELDING for pid: %u\n", pid);
 
-
+    mp2_struct *yielding_task = NULL;
     mutex_lock(&mutex_list);
     list_for_each_entry(i, &head_task, task_node) {
         if (i->pid == pid) {
             printk(KERN_ALERT "Found my PID!!\n");
             
-            if (jiffies < i->deadline) {
-                printk(KERN_ALERT "Before the deadline, should sleep\n");
-                // set the state of the yielding task to sleeping
-                i->state = SLEEPING;
-
-                // calculate the next release time
-                i->deadline += msecs_to_jiffies(i->period);
-                /* setup timer interval to period jiffies */
-                mod_timer(&(i->task_timer), i->deadline);
-                // put the task to sleep as task uniterruptible
-                set_task_state(i->task, TASK_UNINTERRUPTIBLE);
-                sparam.sched_priority = 0;
-                sched_setscheduler(dispatch_thread.task, SCHED_NORMAL, &sparam);
-                schedule();
-
-                printk(KERN_ALERT "Process %u is sleeping now\n", i->pid);
-            } else { // missed our deadline
-                printk(KERN_ALERT "Missed the deadline\n");
-                i->deadline += msecs_to_jiffies(i->period);
-            }
+            yielding_task = i;
             // printk(KERN_ALERT "FOUND PID!!\n");
             // spin_lock_irqsave(&mp2_spin_lock, 0);
             // spin_unlock_irqrestore(&mp2_spin_lock, 0);
@@ -271,6 +256,29 @@ static void YIELD(unsigned int pid){
         }    
     }
     mutex_unlock(&mutex_list);
+    if (yielding_task != NULL && yielding_task->task != NULL) {
+        if (jiffies < yielding_task->deadline) {
+            printk(KERN_ALERT "Before the deadline, should sleep\n");
+            // set the state of the yielding task to sleeping
+            yielding_task->state = SLEEPING;
+            // calculate the next release time
+            yielding_task->deadline += msecs_to_jiffies(yielding_task->period);
+            /* setup timer interval to period jiffies */
+            mod_timer(&(yielding_task->task_timer), yielding_task->deadline);
+            // put the task to sleep as task uniterruptible
+            set_task_state(yielding_task->task, TASK_UNINTERRUPTIBLE);
+            sparam.sched_priority = 0;
+            sched_setscheduler(dispatch_thread.task, SCHED_NORMAL, &sparam);
+            schedule();
+            printk(KERN_ALERT "Process %u is sleeping now\n", yielding_task->pid);
+        } else { // missed our deadline
+            printk(KERN_ALERT "Missed the deadline\n");
+            yielding_task->deadline += msecs_to_jiffies(yielding_task->period);
+        }
+
+    }
+
+
 }
 
 static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
@@ -304,7 +312,7 @@ static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, l
         line = kmalloc(LINE_LENGTH, GFP_KERNEL);
         memset(line, 0, LINE_LENGTH);
 
-        sprintf(line, "PID: %u, cputime: %lu\n", i->pid, i->cputime);
+        sprintf(line, "PID: %u, period: %lu\n", i->pid, i->period);
         line_length = strlen(line);
         
         snprintf(buf_curr_pos, line_length + 1, "%s", line); // + 1 to account for the null char
