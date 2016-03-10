@@ -33,14 +33,6 @@ static DEFINE_SPINLOCK(my_lock);
 #define READ_BUFFER_SIZE 400
 #define LINE_LENGTH 80
 
-// linked list helper code
-typedef struct node
-{
-    struct list_head list;
-    int pid;
-    long unsigned cputime;
-} list_node;
-
 static LIST_HEAD(head);
 DEFINE_MUTEX(mutex_list);
 
@@ -118,8 +110,8 @@ static int dispatch_thread_function(void *arg){
             // currently_running_task->state = RUNNING;
         } else {
             printk(KERN_ALERT "Will be switching to PID: %u", next_task->pid);
-            // there was a currently running task
-            if (currently_running_task != NULL) {
+            // there was a currently running task and task has not ended
+            if (currently_running_task != NULL && currently_running_task->task != NULL) {
                 // pre-empt the currently running task, only if it's running
                 sparam.sched_priority=0;
                 if (currently_running_task->state == RUNNING) {
@@ -245,7 +237,7 @@ static void YIELD(unsigned int pid){
     printk(KERN_ALERT "YIELDING for pid: %u\n", pid);
 
 
-    // mutex_lock(&mutex_list);
+    mutex_lock(&mutex_list);
     list_for_each_entry(i, &head_task, task_node) {
         if (i->pid == pid) {
             printk(KERN_ALERT "Found my PID!!\n");
@@ -278,7 +270,7 @@ static void YIELD(unsigned int pid){
             
         }    
     }
-    // mutex_unlock(&mutex_list);
+    mutex_unlock(&mutex_list);
 }
 
 static ssize_t mp2_read (struct file *file, char __user *buffer, size_t count, loff_t *data){
@@ -393,8 +385,6 @@ int __init mp2_init(void)
 // mp2_exit - Called when module is unloaded
 void __exit mp2_exit(void)
 {
-    list_node *cursor;
-    list_node *next;
     #ifdef DEBUG
         printk(KERN_ALERT "MP2 MODULE UNLOADING\n");
     #endif
@@ -403,14 +393,6 @@ void __exit mp2_exit(void)
     proc_remove(proc_entry);
     proc_remove(proc_dir);
     
-    // remove list node from list, free the wrapping struct
-    // mutex_lock(&mutex_list);
-    list_for_each_entry_safe(cursor, next, &head, list) {
-        list_del(&(cursor->list));
-        kfree(cursor);
-    }
-    // mutex_unlock(&mutex_list);
-
     #ifdef DEBUG
         printk(KERN_ALERT "MP2 MODULE UNLOADED\n");
     #endif
