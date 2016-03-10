@@ -63,24 +63,30 @@ int process_in_list() {
     char needle[32];
     memset(needle, 0, 32);
     sprintf(needle, "PID: %u", pid);
-
-    statusfile = fopen("/proc/mp2/status", "r+");
-    char haystack[SIZE];
-    char *pos = NULL;
-    // size_t ret_code = fread(haystack, sizeof *haystack, SIZE, statusfile); // reads an array of doubles
-    while (fgets(haystack, sizeof(haystack), statusfile) != NULL) {
-        pos = strstr(haystack, needle);
-        if (pos != NULL) {
-            break;
-        }
+    printf("searching for string: %s\n", needle);
+    FILE *f = fopen("/proc/mp2/status", "r");
+    if (f == NULL) {
+        perror("Could not open MP2 status file.");
+        exit(1);
     }
+    size_t sz = 0;
+    char * lin = 0;
 
-    // figure out how to parse this string later
-    fclose(statusfile);
+    int found = 0;
+    do {
+        ssize_t lsz = getline (&lin, &sz, f);
+        if (lsz >= 0) {
+            char *find = strstr(lin, needle);
+            if (find != NULL) {
+                found = 1;
+            }
+        }
+        free(lin);
+        lin = 0;
+    } while (!feof (f));
+    fclose (f);
 
-
-
-    return pos != NULL;
+    return found;
 }
 
 int main(int argc, char* argv[]) {

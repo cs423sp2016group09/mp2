@@ -309,10 +309,10 @@ static void YIELD(unsigned int pid){
                 // set expiry time
                 i->task_timer.expires = msecs_to_jiffies(i->deadline);
                 add_timer (&i->task_timer);
-		set_task_state(i->task, TASK_UNINTERRUPTIBLE);
-		sparam.sched_priority = 0;
-		sched_setscheduler(&dispatch_thread, SCHED_NORMAL, &sparam);
-		schedule();
+                set_task_state(i->task, TASK_UNINTERRUPTIBLE);
+                sparam.sched_priority = 0;
+                sched_setscheduler(&dispatch_thread, SCHED_NORMAL, &sparam);
+                schedule();
             } else { // missed our deadline
                 i->deadline += i->period;
             }
