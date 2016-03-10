@@ -311,7 +311,7 @@ static void YIELD(unsigned int pid){
                 add_timer (&i->task_timer);
                 set_task_state(i->task, TASK_UNINTERRUPTIBLE);
                 sparam.sched_priority = 0;
-                sched_setscheduler(&dispatch_thread, SCHED_NORMAL, &sparam);
+                sched_setscheduler(dispatch_thread.task, SCHED_NORMAL, &sparam);
                 schedule();
             } else { // missed our deadline
                 i->deadline += i->period;
