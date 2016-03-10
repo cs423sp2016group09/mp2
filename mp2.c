@@ -124,14 +124,12 @@ static int dispatch_thread_function(void *arg){
             currently_running_task = next_task;
             next_task->state = RUNNING;
             wake_up_process(next_task->task);
-            sparam.sched_priority=90;
+            sparam.sched_priority=99;
             sched_setscheduler(next_task->task, SCHED_FIFO, &sparam);
 
         }
         
         // use set_current_state and schedule to put the dispatching thread to sleep
-        sparam.sched_priority=0;
-        sched_setscheduler(dispatch_thread.task, SCHED_NORMAL, &sparam);
         set_current_state(TASK_INTERRUPTIBLE);
         schedule();        
         printk(KERN_ALERT "Put dispatching thread to sleep\n");
@@ -142,8 +140,6 @@ static int dispatch_thread_function(void *arg){
 static void wake_up_timer_function(unsigned long arg){
     unsigned long flags;
     
-    struct sched_param sparam;
-
     mp2_struct *waking_task = (mp2_struct *)arg;
     printk(KERN_ALERT "Timer bell rung! \t I belong to %u!\n", waking_task->pid);
     spin_lock_irqsave(&my_lock, flags);
@@ -152,8 +148,6 @@ static void wake_up_timer_function(unsigned long arg){
 
     printk(KERN_ALERT "Waking up dispatch\n");
     wake_up_process(dispatch_thread.task);
-    sparam.sched_priority=99;
-    sched_setscheduler(dispatch_thread.task, SCHED_FIFO, &sparam);
 }
 
 
